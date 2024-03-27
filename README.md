@@ -1,5 +1,7 @@
 # N741 - Spring 2024: Build and Test Models
 
+See example at [https://melindahiggins2000.github.io/N741_Spring2024_buildtestmodels/BuildTestModels_Penguins.v1.html](https://melindahiggins2000.github.io/N741_Spring2024_buildtestmodels/BuildTestModels_Penguins.v1.html)
+
 This Rmarkdown shows an example of fitting a simple linear regression model by illustrating these concepts:
 
 1. Splitting a sample dataset into a training and test dataset
