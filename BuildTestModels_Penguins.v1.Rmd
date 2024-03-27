@@ -1,0 +1,545 @@
+---
+title: "Build Test Models of Penguins"
+author: "Melinda Higgins"
+date: "2024-03-20"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      error = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+
+library(palmerpenguins)
+library(dplyr)
+```
+
+## Penguin Measurements
+
+For this example we are going to use the `penguins` dataset from the `palmerpenguins` package.
+
+Let's make a copy of the dataset.
+
+```{r}
+# make a copy of the penguins dataset
+pdat <- penguins
+```
+## `easystats` package
+
+A bundle of packages that has many useful packages is the `easystats` package. Learn more at: [https://easystats.github.io/easystats/](https://easystats.github.io/easystats/)
+
+Let's look at summary stats for the 4 main penguin measurements using `report` package from `easystats` package bundle. The function `report_table()` provides a nice summary.
+
+```{r}
+library(easystats)
+
+# look at measurements of penguins - overall
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g) %>%
+  report_table() %>%
+  summary() %>%
+  display()
+```
+
+## `gtsummary` package
+
+Another helpful package is `gtsummary` which provides nice descriptive summary tables using the `tbl_summary()` function. And as we will see below, this package also has a nice summary function for fitted models as well, `tbl_regression()`.
+
+Learn more at: [https://www.danieldsjoberg.com/gtsummary/index.html](https://www.danieldsjoberg.com/gtsummary/index.html)
+
+**NOTE**: The summary defaults to reporting median(IQR) and number of missing.
+
+```{r}
+library(gtsummary)
+
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g) %>%
+  tbl_summary()
+```
+
+However, you can customize the summary statistics - for example, let's also add mean (SD), and add range.
+
+To accomplish this, you have to add `type = all_continuous() ~ "continuous2"` inside `tbl_summary()` function call.
+
+```{r}
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g) %>%
+  tbl_summary(
+    type = all_continuous() ~ "continuous2",
+    statistic = all_continuous() ~ c(
+      "{N_nonmiss}",
+      "{mean} ({sd})",
+      "{median} [{p25}, {p75}]",
+      "{min}, {max}"
+    )
+  )
+```
+
+But it might be nice to clean this table up a little, so let's just get mean, sd and unknowns.
+
+And, let's also add `by = species` to get the statistics for each species - remember to also `species` to the preceeding select statement first.
+
+```{r}
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g,
+         species) %>%
+  tbl_summary(
+    by = species,
+    type = all_continuous() ~ "continuous2",
+    statistic = all_continuous() ~ c(
+      "{mean} ({sd})"
+    )
+  )
+```
+
+## Also explore the `correlation` package from `easystats`
+
+A helpful exploratory approach to investigate which variables might be useful for making predictions is to look at bivariate correlations to start.
+
+Suppose we are interested in being able to create a model to predict body mass from one of the other 3 measurements.
+
+We're going to use the `correlation()` function from the  `correlation` package from `easystats` package bundle. For now, we'll use the defaults which computes "Pearson" correlations. This can be changed to "Spearman" or "Kendall" and many more - see help.
+
+We will first "order" the variables - list body mass in first column, then look other 3.
+
+The `summary()` of the `correlation()` results does a default sort of the correlations into highest to lowest, positive to neg correlations...
+
+```{r}
+library(correlation)
+
+pdat %>%
+  select(
+    body_mass_g,
+    bill_length_mm,
+    bill_depth_mm,
+    flipper_length_mm
+    ) %>%
+  correlation() %>%
+  summary() %>%
+  display()
+```
+
+So, if we want to preserve the order, set `redundant = TRUE` to get full correlation matrix in order specified.
+
+```{r}
+pdat %>%
+  select(
+    body_mass_g,
+    bill_length_mm,
+    bill_depth_mm,
+    flipper_length_mm
+    ) %>%
+  correlation() %>%
+  summary(redundant = TRUE) %>%
+  display()
+```
+
+The highest correlation (positive or negative) is between `body_mass_g` and `flipper_length_mm`.
+
+## `GGally` package - explore associations
+
+Another nice package that is helpful for exploring correlations and visualizing them either overall or by group is `GGally`, learn more at [https://ggobi.github.io/ggally/](https://ggobi.github.io/ggally/).
+
+We can "visualize" the correlation matrix above using the `ggpairs()` function from `GGally`.
+
+```{r}
+library(GGally)
+
+# just get the 4 measurement columns
+pdat1 <- pdat %>%
+  select(
+    body_mass_g,
+    bill_length_mm,
+    bill_depth_mm,
+    flipper_length_mm
+    ) 
+
+# make a pairwise plot matrix
+ggpairs(pdat1)
+```
+
+Let's also look at these split by species.
+
+```{r}
+# just get the 4 measurement columns - add species
+pdat2 <- pdat %>%
+  select(
+    body_mass_g,
+    bill_length_mm,
+    bill_depth_mm,
+    flipper_length_mm,
+    species
+    ) 
+
+# make a pairwise plot matrix
+ggpairs(pdat2,
+        mapping = aes(color = species))
+```
+
+Notice that for the Adelie penguins, the correlation between body mass and flipper length is not as strong as it is for the other 2 species.
+
+## Fitting a simple linear regression model
+
+So, let's fit a simple linear regression model to "predict" penguin body mass from their flipper length.
+
+* outcome Y
+    - Y = `body_mass_g`
+* predictor X
+    - X = `flipper_length_mm`
+* model "error" (residuals) = $\epsilon$
+   - $\epsilon$ is the difference between the original measurement $Y_i$ and the value predicted by the model $\hat{Y}_i$
+    
+$$ Y = \beta_0 + \beta_1(X) + \epsilon$$    
+
+where the model error (or residuals) account for:
+
+* lack of fit of the model 
+    - is a linear model best?
+    - do we have the right set of predictors?
+* measurement errors
+    - measurement error (or noise) in Y
+    - measurement error (or noise) in X's
+
+$$ \epsilon_i = Y_i - \hat{Y}_i $$
+
+## Consider Test, Train, Validation
+
+**NOTE**: There are 2 cases with missing data. To avoid some issues later on, let's go ahead and remove these 2 cases BEFORE building the models.
+
+```{r}
+# remove 2 cases with missing data to get started
+# and keep only these variables
+# island, species, 
+pdat1 <- penguins %>%
+  select(species, island, body_mass_g, flipper_length_mm) %>%
+  filter(complete.cases(.))
+```
+
+Let's look at the associations between body mass and flipper length for the 3 species of penguins and let's also look at this by the 3 islands sampling sites.
+
+```{r}
+library(ggplot2)
+
+ggplot(pdat1,
+       aes(y=body_mass_g, 
+           x=flipper_length_mm,
+           color = species)) +
+  geom_point() +
+  geom_smooth(method = lm) + 
+  facet_wrap(vars(island))
+```
+
+To illustrate the idea of obtaining 1 sample dataset to split into training and test datasets and to also obtain a separate validation dataset, we're going to focus on the Adelie penguins since they were sampled from all 3 islands. So, we're going to create 2 samples:
+
+1. Sample 1 - Adelie penguins from Biscoe and Torgersen island
+2. Sample 2 - Adelie Penguins from Dream island
+
+## Look at Adelie Penguins
+
+To illustrate the idea of obtaining 1 sample dataset to split into training and test datasets and to also obtain a separate validation dataset, we're going to focus on the Adelie penguins since they were sampled from all 3 islands. So, we're going to create 2 samples:
+
+1. Sample 1 - Adelie penguins from Biscoe and Torgersen island
+    - this will next be split into 
+    - training dataset and
+    - test dataset
+2. Sample 2 - Adelie Penguins from Dream island
+
+```{r}
+s1 <- pdat1 %>%
+  filter(island %in% c("Biscoe", "Torgersen")) %>%
+  filter(species == "Adelie")
+
+s2 <- pdat1 %>%
+  filter(island == "Dream") %>%
+  filter(species == "Adelie")
+```
+
+## Split Sample 1 (s1) into training and test
+
+**Remember to set random seed**
+
+Use `dplyr::slice_sample()` function to get a random sample of 70% of the original dataset for training and the remaining 30% for model testing.
+
+**NOTE**: this `dplyr::slice_sample()` function uses random sampling without replacement as the default, which is usually what is done for splitting up training and testing since these should NOT have any samples in common. However, I will also show a bootstrapping example below which does use random sampling with replacement.
+
+```{r}
+# set random seed
+set.seed(741)
+
+# add a rownumber for tracking
+s1$rownum <- row.names(s1)
+
+s1_train <- s1 %>%
+  slice_sample(prop = 0.70)
+
+# get row numbers from s1_train
+s1_train_rn <- s1_train$rownum
+
+# get rows NOT ! in this rownum list
+s1_test <- s1 %>%
+  filter(! rownum %in% s1_train_rn)
+```
+
+## Fit a model for `body_mass_g` predicted by `flipper_length_mm`
+
+Let's fit a simple linear model for `body_mass_g` predicted by `flipper_length_mm` using the training dataset, `s1_train`.
+
+```{r}
+mod_s1_train <- 
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s1_train)
+```
+
+### Simple model summary
+
+Get the model summary - including the coefficients and p-values as well as the model fit statistics.
+
+```{r}
+summary(mod_s1_train)
+```
+
+### A nicer model summary with `gtsummary`
+
+```{r}
+library(gtsummary)
+tbl_regression(mod_s1_train,
+               intercept = TRUE)
+```
+
+## Another helpful package, `broom`
+
+The `broom` package also has several helpful model summary functions, including `tidy()` and `glance()`.
+
+```{r}
+library(broom)
+tidy(mod_s1_train) %>% knitr::kable()
+glance(mod_s1_train) %>% knitr::kable()
+```
+
+### Formatting model output - `apaTables`
+
+The `apaTables` package also makes nice model summary tables.
+
+```{r}
+library(apaTables)
+table1 <- apa.reg.table(mod_s1_train)
+data.frame(table1$table_body) %>% knitr::kable()
+data.frame(table1$table_note) %>% knitr::kable()
+```
+
+## Look at Model Predictions from Training Data
+
+For linear regression we will focus here on the "r2" model fit statistics. As a quick reminder, here is how "r2" is actually computed:
+
+**NOTE**: $$SST = SSE + SSR $$
+
+where:
+* SST = sums of squares for total
+* SEE = sums of squares to error (or residuals)
+* SSR = sums of squares for regression model
+
+$$SS_{total} = \sum_{i=1}^{n}(Y_i - \bar{Y})^2$$
+
+Sums of Square for "error" (or residuals)
+
+$$SS_{error} = \sum_{i=1}^{n}(Y_i - \hat{Y}_i)^2 = \sum_{i=1}^{n}(\epsilon_i)^2$$
+
+Sums of Square for "Regression" model
+
+$$SS_{regression} = \sum_{i=1}^{n}(\hat{Y}_i - \bar{Y})^2$$
+
+
+
+```{r}
+s1_train_predict <- predict.lm(mod_s1_train,
+                               newdata = s1_train)
+
+# s1_train_fitted <- fitted(mod_s1_train)
+
+SS.total <- 
+  sum((s1_train$body_mass_g - mean(s1_train$body_mass_g))^2)
+SS.total
+
+# SS.residual <- 
+#   sum(residuals(mod_s1_train)^2)
+
+SS.residual <-
+  sum((s1_train$body_mass_g - s1_train_predict)^2)
+SS.residual
+
+# SS.regression <- 
+#   sum((fitted(mod_s1_train) - mean(s1_train$body_mass_g))^2)
+
+SS.regression <-
+  sum((s1_train_predict - mean(s1_train$body_mass_g))^2)
+SS.regression
+
+# this should be close to 0
+SS.total - (SS.regression + SS.residual)
+
+# Fraction of variation explained by the model
+SS.regression/SS.total
+
+# Compute R2
+# same thing, for model frame ONLY!!!
+1 - (SS.residual/SS.total)  
+    
+# From the fitted model you can also pull R2
+summary(mod_s1_train)$r.squared 
+```
+
+### Look at original training data with predicted training data from the fitted model
+
+If the model exactly predicts the data, then the points in this plot should line up along a Y = X (diagnoal line at 45 degrees), e.g. a line with y-intercept equal to 0 and a slope of 1.
+
+```{r}
+plot(s1_train$body_mass_g, s1_train_predict)
+abline(a = 0, b = 1, col = "red")
+```
+
+
+## Look at Model Predictions from Test Data
+
+Let's run the same calculations as above - but this time using the test dataset with the model we fit above from the training data.
+
+Basically, how does the model perform with data it has not seen before - data that was not used to train/create it.
+
+```{r}
+s1_test_predict <- predict.lm(mod_s1_train,
+                              newdata = s1_test)
+
+SS.total_test <- 
+  sum((s1_test$body_mass_g - mean(s1_test$body_mass_g))^2)
+SS.total_test
+
+SS.residual_test <-
+  sum((s1_test$body_mass_g - s1_test_predict)^2)
+SS.residual_test
+
+SS.regression_test <-
+  sum((s1_test_predict - mean(s1_test$body_mass_g))^2)
+SS.regression_test
+
+SS.total_test - (SS.regression_test + SS.residual_test)
+
+SS.regression_test/SS.total_test
+
+1 - (SS.residual_test/SS.total_test)
+```
+
+Make a plot of the original test data against what the model predicted - again compare to a Y = X diagnonal line.
+
+```{r}
+plot(s1_test$body_mass_g, s1_test_predict)
+abline(a = 0, b = 1, col = "red")
+```
+
+## Try validation set of Adelie penguins from Dream
+
+Now let's look at how well the model predicts body mass for Penguins from a sample not involved in the sample above - the penguins from the Dream island.
+
+```{r}
+s2_test_predict <- predict.lm(mod_s1_train,
+                              newdata = s2)
+
+SS.total_test2 <- 
+  sum((s2$body_mass_g - mean(s2$body_mass_g))^2)
+SS.total_test2
+
+SS.residual_test2 <-
+  sum((s2$body_mass_g - s2_test_predict)^2)
+SS.residual_test2
+
+SS.regression_test2 <-
+  sum((s2_test_predict - mean(s2$body_mass_g))^2)
+SS.regression_test2
+
+SS.total_test2 - (SS.regression_test2 + SS.residual_test2)
+
+SS.regression_test2/SS.total_test2
+
+1 - (SS.residual_test2/SS.total_test2)
+```
+
+And make this plot of the Adelie penguins from Dream island and what the model predicts - compare to Y = X line.
+
+```{r}
+plot(s2$body_mass_g, s2_test_predict)
+abline(a = 0, b = 1, col = "red")
+```
+
+## Compare associations between 3 datasets
+
+We could also fit 3 models - one for each of the datasets above:
+* s1_train - training dataset
+* s1_test - test dataset
+* s2 - other sample from Dream island
+
+Let's see how close or different the 3 sets of model coefficients are - and see the variation in the model fit r2 values.
+
+```{r}
+mod_s1_train <- 
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s1_train)
+summary(mod_s1_train)
+
+mod_s1_test <-
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s1_test)
+summary(mod_s1_test)
+
+mod_s2 <-
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s2)
+summary(mod_s2)
+```
+
+Compare coefficients in a quick table.
+
+```{r}
+data.frame(coef(mod_s1_train),
+           coef(mod_s1_test),
+           coef(mod_s2)) %>%
+  knitr::kable()
+```
+
+## Bootstrapping for s1
+
+Another way to look at the robustness of fitted model and fitted coefficients is to perform a bootstrapping. Instead of breaking the original sample (s1) into a training and test dataset - now we will basically take a random sample WITH replacement from s1, fit the model and repeat the process a whole bunch of times (500-1000x) and look at the distribution of the beta coefficients, model fit statistics and more.
+
+For now - let's bootstrap the beta coefficients.
+
+We will use the `Boot()` function from the `car` package.
+
+```{r}
+m1 <- lm(body_mass_g ~ flipper_length_mm,
+     data = s1)
+
+library(car)
+set.seed(741)
+
+betahat.boot <- Boot(m1, R=500)
+summary(betahat.boot)  # default summary
+confint(betahat.boot)
+hist(betahat.boot)
+```
+

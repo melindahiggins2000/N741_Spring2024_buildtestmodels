@@ -1,0 +1,425 @@
+---
+title: "Build Test Models of Penguins"
+author: "Melinda Higgins"
+date: "2024-03-20"
+output: 
+  html_document:
+    toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      error = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+
+library(palmerpenguins)
+library(dplyr)
+#library(gtsummary)
+#library(rsample)
+#library(caret)
+```
+
+## Penguin Measurements
+
+For this example we are going to use the `penguins` dataset from the `palmerpenguins` package.
+
+```{r}
+# make a copy of the penguins dataset
+pdat <- penguins
+```
+## easystats package
+
+[https://easystats.github.io/easystats/](https://easystats.github.io/easystats/)
+
+look at summary stats using report package from easystats package bundle...
+
+```{r}
+library(easystats)
+
+# look at measurements of penguins - overall
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g) %>%
+  report_table() %>%
+  summary() %>%
+  display()
+```
+
+## gtsummary
+
+[https://www.danieldsjoberg.com/gtsummary/index.html](https://www.danieldsjoberg.com/gtsummary/index.html)
+
+defaults to median(IQR) and number of missing
+
+```{r}
+library(gtsummary)
+
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g) %>%
+  tbl_summary()
+```
+
+also add mean (SD), and add range
+
+have to add `type = all_continuous() ~ "continuous2"` inside `tbl_summary()` function call
+
+```{r}
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g) %>%
+  tbl_summary(
+    type = all_continuous() ~ "continuous2",
+    statistic = all_continuous() ~ c(
+      "{N_nonmiss}",
+      "{mean} ({sd})",
+      "{median} [{p25}, {p75}]",
+      "{min}, {max}"
+    )
+  )
+```
+
+clean up - just get mean, sd and unknowns
+
+and by group = species - add to select statement first
+
+```{r}
+pdat %>%
+  select(bill_length_mm,
+         bill_depth_mm,
+         flipper_length_mm,
+         body_mass_g,
+         species) %>%
+  tbl_summary(
+    by = species,
+    type = all_continuous() ~ "continuous2",
+    statistic = all_continuous() ~ c(
+      "{mean} ({sd})"
+    )
+  )
+```
+
+## models to predict body mass from other 3 measurements
+
+look at correlations - use correlation package from easystats package bundle...
+
+list body mass in first column, then look other 3
+
+the summary() of the correlation() results - default sorts them into highest to lowest, positive to neg correlations...
+
+```{r}
+library(correlation)
+
+pdat %>%
+  select(
+    body_mass_g,
+    bill_length_mm,
+    bill_depth_mm,
+    flipper_length_mm
+    ) %>%
+  correlation() %>%
+  summary() %>%
+  display()
+```
+
+set redundant = TRUE to get full matrix in order specified
+
+```{r}
+pdat %>%
+  select(
+    body_mass_g,
+    bill_length_mm,
+    bill_depth_mm,
+    flipper_length_mm
+    ) %>%
+  correlation() %>%
+  summary(redundant = TRUE) %>%
+  display()
+```
+
+## fit a simple linear regression model
+
+* outcome Y
+    - Y = body_mass_g
+* predictors X's
+    - X1 = bill_length_mm
+    - X2 = bill_depth_mm
+    - X3 = flipper_length_mm
+* model "error" (residuals) = $\epsilon$
+   - $\epsilon$ is the difference between the original measurement $Y_i$ and the value predicted by the model $\hat{Y}_i$
+    
+$$ Y = \beta_1(X_1) + \beta_2(X_2) + \beta_3(X_3) + \epsilon$$    
+
+where the model error (or residuals) account for:
+
+* lack of fit of the model 
+    - is a linear model best?
+    - do we have the right set of predictors?
+* measurement errors
+    - measurement error (or noise) in Y
+    - measurement error (or noise) in X's
+
+$$ \epsilon_i = Y_i - \hat{Y}_i $$
+
+## ggally package - explore associations
+
+another package that is helpful for exploring correlations and visualizing them either overall or by group is GGally
+
+```{r}
+library(GGally)
+
+
+```
+
+
+## Consider Test, Train, Validation
+
+```{r}
+# remove 2 cases with missing data to get started
+# and keep only these variables
+# island, species, 
+pdat1 <- penguins %>%
+  select(species, island, body_mass_g, flipper_length_mm) %>%
+  filter(complete.cases(.))
+```
+
+
+```{r}
+library(ggplot2)
+
+ggplot(pdat1,
+       aes(y=body_mass_g, 
+           x=flipper_length_mm,
+           color = species)) +
+  geom_point() +
+  geom_smooth(method = lm) + 
+  facet_wrap(vars(island))
+```
+
+## Look at Adelie Penguins
+
+Let's split the data into 2 samples:
+
+* sample 1 (s1) for Adelie Penguins from Biscoe and Torgersen islands
+* sample 2 (s2) for Adelie Penguins from Dream island
+
+```{r}
+s1 <- pdat1 %>%
+  filter(island %in% c("Biscoe", "Torgersen")) %>%
+  filter(species == "Adelie")
+
+s2 <- pdat1 %>%
+  filter(island == "Dream") %>%
+  filter(species == "Adelie")
+```
+
+## Split Sample 1 (s1) into training and test
+
+**Remember to set random seed**
+
+Use `dplyr::slice_sample()` function - this function be default uses random sampling without replacement
+
+```{r}
+# set random seed
+set.seed(741)
+
+# add a rownumber for tracking
+s1$rownum <- row.names(s1)
+
+s1_train <- s1 %>%
+  slice_sample(prop = 0.70)
+
+# get row numbers from s1_train
+s1_train_rn <- s1_train$rownum
+
+# get rows NOT ! in this rownum list
+s1_test <- s1 %>%
+  filter(! rownum %in% s1_train_rn)
+```
+
+## Train a model for body_mass_g, predicted by flipper_length_mm
+
+```{r}
+mod_s1_train <- 
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s1_train)
+```
+
+```{r}
+summary(mod_s1_train)
+```
+
+```{r}
+library(gtsummary)
+tbl_regression(mod_s1_train,
+               intercept = TRUE)
+```
+
+```{r}
+library(broom)
+tidy(mod_s1_train) %>% knitr::kable()
+glance(mod_s1_train) %>% knitr::kable()
+```
+
+```{r}
+library(apaTables)
+table1 <- apa.reg.table(mod_s1_train)
+data.frame(table1$table_body) %>% knitr::kable()
+data.frame(table1$table_note) %>% knitr::kable()
+```
+
+## Look at Model Predictions from Training Data
+
+```{r}
+s1_train_predict <- predict.lm(mod_s1_train,
+                               newdata = s1_train)
+
+# s1_train_fitted <- fitted(mod_s1_train)
+
+SS.total <- 
+  sum((s1_train$body_mass_g - mean(s1_train$body_mass_g))^2)
+SS.total
+
+# SS.residual <- 
+#   sum(residuals(mod_s1_train)^2)
+
+SS.residual <-
+  sum((s1_train$body_mass_g - s1_train_predict)^2)
+SS.residual
+
+# SS.regression <- 
+#   sum((fitted(mod_s1_train) - mean(s1_train$body_mass_g))^2)
+
+SS.regression <-
+  sum((s1_train_predict - mean(s1_train$body_mass_g))^2)
+SS.regression
+
+SS.total - (SS.regression + SS.residual)
+
+SS.regression/SS.total # fraction of variation explained by the model
+
+1 - (SS.residual/SS.total) # same thing, for model frame ONLY!!! 
+    
+summary(mod_s1_train)$r.squared # both are = R.squared
+
+```
+
+```{r}
+plot(s1_train$body_mass_g, s1_train_predict)
+abline(a = 0, b = 1, col = "red")
+```
+
+
+## Look at Model Predictions from Test Data
+
+```{r}
+s1_test_predict <- predict.lm(mod_s1_train,
+                              newdata = s1_test)
+
+SS.total_test <- 
+  sum((s1_test$body_mass_g - mean(s1_test$body_mass_g))^2)
+SS.total_test
+
+SS.residual_test <-
+  sum((s1_test$body_mass_g - s1_test_predict)^2)
+SS.residual_test
+
+SS.regression_test <-
+  sum((s1_test_predict - mean(s1_test$body_mass_g))^2)
+SS.regression_test
+
+SS.total_test - (SS.regression_test + SS.residual_test)
+
+SS.regression_test/SS.total_test
+
+1 - (SS.residual_test/SS.total_test)
+```
+
+```{r}
+plot(s1_test$body_mass_g, s1_test_predict)
+abline(a = 0, b = 1, col = "red")
+```
+
+## try validation set of Adelie penguins from Dream
+
+```{r}
+s2_test_predict <- predict.lm(mod_s1_train,
+                              newdata = s2)
+
+SS.total_test2 <- 
+  sum((s2$body_mass_g - mean(s2$body_mass_g))^2)
+SS.total_test2
+
+SS.residual_test2 <-
+  sum((s2$body_mass_g - s2_test_predict)^2)
+SS.residual_test2
+
+SS.regression_test2 <-
+  sum((s2_test_predict - mean(s2$body_mass_g))^2)
+SS.regression_test2
+
+SS.total_test2 - (SS.regression_test2 + SS.residual_test2)
+
+SS.regression_test2/SS.total_test2
+
+1 - (SS.residual_test2/SS.total_test2)
+```
+
+```{r}
+plot(s2$body_mass_g, s2_test_predict)
+abline(a = 0, b = 1, col = "red")
+```
+
+## compare associations between 3 datasets
+
+```{r}
+mod_s1_train <- 
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s1_train)
+summary(mod_s1_train)
+
+mod_s1_test <-
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s1_test)
+summary(mod_s1_test)
+
+mod_s2 <-
+  lm(body_mass_g ~ flipper_length_mm,
+     data = s2)
+summary(mod_s2)
+```
+
+compare coefficients
+
+```{r}
+data.frame(coef(mod_s1_train),
+           coef(mod_s1_test),
+           coef(mod_s2))
+```
+
+## bootstrapping for s1
+
+look at robustness of fitted coefficients
+
+```{r}
+m1 <- lm(body_mass_g ~ flipper_length_mm,
+     data = s1)
+
+library(car)
+set.seed(741)
+
+betahat.boot <- Boot(m1, R=500)
+summary(betahat.boot)  # default summary
+confint(betahat.boot)
+hist(betahat.boot)
+```
+
